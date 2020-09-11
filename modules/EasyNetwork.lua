@@ -31,13 +31,13 @@ Api:
 ]]
 
 -- Services
-local ReplicatedStorage	= game:GetService("ReplicatedStorage")
+local replicatedStorage	= game:GetService("ReplicatedStorage")
 local server = game:FindService("NetworkServer")
 local remote = {remoteEvent = {}; remoteFunction = {}}
 
 -- Objects
 local remoteEvent, remoteFunction, functionCache, remoteEvents, remoteFunctions = remote.remoteEvent, remote.remoteFunction, {}, {}, {}
-local osTime, newInstance, traceback = os.time, Instance.new, debug.traceback
+local osTime, traceback = os.time, debug.traceback
 
 -- Values
 local maxWait = 1
@@ -46,14 +46,14 @@ local defaultCache = 10
 -------- Private Functions --------
 
 -- .. Creates a instance
-local function Create(classType, properties)	
-	assert(type(properties) == "table", "Properties is not a table")
+local function Create(classType, parent, name)	
+	assert(type(name) == "string", "Name is not a string")
+	assert(type(classType) == "string", "ClassType is not a string")
 	
-	local object = newInstance(classType)
+	local object = Instance.new(classType)
 	
-	for property, propertyValue in next, properties do
-		object[property] = propertyValue
-	end
+	object.Parent = parent
+	object.Name = name
 	
 	return object
 end
@@ -61,16 +61,22 @@ end
 -- .. Waits for a child, more expensive then using object:WaitForChild
 local function WaitForChild(parent, name, timeLimit)	
 	local child = parent:FindFirstChild(name)
+		
 	local startTime = tick()
 	local warned = false
 	
 	-- ## Loops until child is 
 	while not child do
 		wait()
+		
+		if child then
+			break
+		end
+		
 		child = parent:FindFirstChild(name)
 		
 		-- ## If not warned and startTime
-		if not warned and startTime + (timeLimit or 5) <= tick() then
+		if not warned and startTime + (timeLimit or 5) <= tick() and not child then
 			warned = true
 			
 			warn("Infinite yield possible for " .. parent:GetFullName() .. ", " .. name .. ")\n" .. traceback())
@@ -85,15 +91,8 @@ local function WaitForChild(parent, name, timeLimit)
 end
 
 -- .. Finds the first child within replicated storage 
-local functionStorage = ReplicatedStorage:FindFirstChild("RemoteFunctions") or Create("Folder" , {
-	Parent = ReplicatedStorage;
-	Name = "RemoteFunctions";
-})
-
-local eventStorage = ReplicatedStorage:FindFirstChild("RemoteEvents") or Create("Folder", {
-	Parent = ReplicatedStorage;
-	Name = "RemoteEvents";
-})
+local functionStorage = replicatedStorage:FindFirstChild("RemoteFunctions") or Create("Folder" , replicatedStorage, "RemoteFunctions")
+local eventStorage = replicatedStorage:FindFirstChild("RemoteEvents") or Create("Folder", replicatedStorage, "RemoteEvents")
 
 -- .. Creates the functionMetatable within the script
 local functionMetatable = {
@@ -165,7 +164,7 @@ end
 
 -- .. Creates a function
 local function CreateFunction(name, instance)
-	local instance = instance or functionStorage:FindFirstChild(name) or newInstance("RemoteFunction")
+	local instance = instance or functionStorage:FindFirstChild(name) or Instance.new("RemoteFunction")
 	
 	instance.Parent = functionStorage
 	instance.Name = name
@@ -178,7 +177,7 @@ end
 
 -- .. Creates a event
 local function CreateEvent(name, instance)
-	local instance = instance or eventStorage:FindFirstChild(name) or newInstance("RemoteEvent")
+	local instance = instance or eventStorage:FindFirstChild(name) or Instance.new("RemoteEvent")
 	
 	instance.Parent = eventStorage
 	instance.Name = name
@@ -261,9 +260,11 @@ end
 -- .. Fires the clients within a table with the arguments difined
 function remoteEvent:SendToPlayers(playerList, ...)
 	assert(server, "SendToPlayers should be called from the Server side")
-
+	
+	local arguments = { ... }
+	
 	for a = 1, #playerList do
-		self.Instance:FireClient(playerList[a], ...)
+		self.Instance:FireClient(playerList[a], unpack(arguments))
 	end
 end
 
@@ -271,21 +272,27 @@ end
 function remoteEvent:SendToPlayer(player, ...)
 	assert(server, "SendToPlayers should be called from the Server side")
 	
-	self.Instance:FireClient(player, ...)
+	local arguments = { ... }
+	
+	self.Instance:FireClient(player, unpack(arguments))
 end
 
 -- .. Fires the server 
 function remoteEvent:SendToServer(...)
 	assert(not server, "SendToServer should be called from the Client side")
 	
-	self.Instance:FireServer(...)
+	local arguments = { ... }
+	
+	self.Instance:FireServer(unpack(arguments))
 end
 
 -- .. Fires all clients
 function remoteEvent:SendToAllPlayers(...)
 	assert(server, "SendToAllPlayers should be called from the Server side")
 	
-	self.Instance:FireAllClients(...)
+	local arguments = { ... }
+	
+	self.Instance:FireAllClients(unpack(arguments))
 end
 
 -- .. Connects a function to the event
@@ -320,10 +327,10 @@ end
 function remoteFunction:CallPlayer(player, ...)
 	assert(server, "CallPlayer should be called from the server side")
 	
-	local args = {...}
+	local arguments = { ... }
 	
 	local attempt, err = pcall(function()
-		return self.Instance:InvokeClient(player, unpack(args))
+		return self.Instance:InvokeClient(player, unpack(arguments))
 	end)
 	
 	if not attempt then
@@ -400,6 +407,8 @@ end
 function remoteFunction:CallServer(...)
 	assert(not server, "CallServer should be called from the client side")
 	
+	local arguments = { ... }
+	
 	local instance = self.Instance
 	local clientCache = instance:FindFirstChild("ClientCache")
 	
@@ -411,14 +420,14 @@ function remoteFunction:CallServer(...)
 		if cache and time() < cache.Expires then
 			return unpack(cache.Value)
 		else
-			local cacheValue = {instance:InvokeServer(...)}
+			local cacheValue = {instance:InvokeServer(unpack(arguments))}
 			
 			functionCache[cacheName] = {Expires = time() + clientCache.Value, Value = cacheValue}
 			
 			return unpack(cacheValue)
 		end
 	else
-		return instance:InvokeServer(...)
+		return instance:InvokeServer(unpack(arguments))
 	end
 end
 
